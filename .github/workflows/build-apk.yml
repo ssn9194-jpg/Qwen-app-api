@@ -13,7 +13,9 @@ permissions:
 jobs:
   build-apk:
     name: Build Debug APK
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 45
 
     steps:
@@ -29,12 +31,97 @@ jobs:
       - name: Locate Android SDK Manager
         shell: bash
         run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
           SDKMANAGER="$(find "$ANDROID_HOME" \
             -type f \
             -path "*/cmdline-tools/*/bin/sdkmanager" \
             2>/dev/null | head -n 1)"
 
           if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found"
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+          echo "Found sdkmanager:"
+          echo "$SDKMANAGER"
+
+      - name: Accept Android licenses
+        shell: bash
+        run: |
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.0"
+
+      - name: Show build environment
+        shell: bash
+        run: |
+          echo "=== JAVA ==="
+          java -version
+
+          echo "=== GRADLE ==="
+          gradle --version
+
+          echo "=== SDK MANAGER ==="
+          "$SDKMANAGER" --version
+
+          echo "=== INSTALLED SDK PACKAGES ==="
+          "$SDKMANAGER" --list_installed || true
+
+      - name: Build Debug APK
+        shell: bash
+        run: |
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            --warning-mode all
+
+      - name: Find generated APK
+        if: success()
+        shell: bash
+        run: |
+          echo "Generated APK files:"
+
+          find app/build/outputs/apk \
+            -type f \
+            -name "*.apk" \
+            -print
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIStudioSuperApp-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIStudioSuperApp-build-reports
+          path: |
+            app/build/reports/**
+            build/reports/**
+          if-no-files-found: ignore
+          retention-days: 7          if [ -z "$SDKMANAGER" ]; then
             echo "sdkmanager not found"
             exit 1
           fi
