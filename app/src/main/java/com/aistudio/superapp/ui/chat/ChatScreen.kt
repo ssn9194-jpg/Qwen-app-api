@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -57,140 +58,578 @@ fun ChatScreen(
     pendingRemoteImage: String?,
     onConsumedRemoteImage: () -> Unit,
 ) {
-    val vm: ChatViewModel = viewModel(factory = ChatViewModel.factory(chatRepo, aiRepo))
+    val vm: ChatViewModel =
+        viewModel(factory = ChatViewModel.factory(chatRepo, aiRepo))
+
     val state by vm.state.collectAsState()
     val messages by vm.messages.collectAsState()
     val sessions by vm.sessions.collectAsState()
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
-    var text by rememberSaveable { mutableStateOf("") }
-    var attachment by remember { mutableStateOf<ChatAttachment?>(null) }
-    var showSessions by remember { mutableStateOf(false) }
-    var showSearch by remember { mutableStateOf(false) }
-    var searchText by rememberSaveable { mutableStateOf("") }
-    var menuExpanded by remember { mutableStateOf(false) }
-    var exportContent by remember { mutableStateOf<String?>(null) }
-    var exportMime by remember { mutableStateOf("text/markdown") }
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
 
-    val selectedModel = models.firstOrNull { it.id == selectedModelId && it.supportsChat }
-        ?: models.firstOrNull { it.supportsChat }
-
-    val createDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(exportMime)) { uri ->
-        if (uri != null) exportContent?.let { writeTextUri(context, uri, it) }
-        exportContent = null
+    var text by rememberSaveable {
+        mutableStateOf("")
     }
-    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            runCatching { context.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            val mime = context.contentResolver.getType(it) ?: "text/plain"
-            attachment = ChatAttachment(it.toString(), mime, it.lastPathSegment ?: "document")
+
+    var attachment by remember {
+        mutableStateOf<ChatAttachment?>(null)
+    }
+
+    var showSessions by remember {
+        mutableStateOf(false)
+    }
+
+    var showSearch by remember {
+        mutableStateOf(false)
+    }
+
+    var searchText by rememberSaveable {
+        mutableStateOf("")
+    }
+
+    var menuExpanded by remember {
+        mutableStateOf(false)
+    }
+
+    var exportContent by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var exportMime by remember {
+        mutableStateOf("text/markdown")
+    }
+
+    var cameraUri by remember {
+        mutableStateOf<Uri?>(null)
+    }
+
+    val selectedModel =
+        models.firstOrNull {
+            it.id == selectedModelId && it.supportsChat
+        } ?: models.firstOrNull {
+            it.supportsChat
         }
-    }
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let {
-            runCatching { context.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            attachment = ChatAttachment(it.toString(), context.contentResolver.getType(it) ?: "image/jpeg", "photo")
+
+    val createDocument =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument(exportMime)
+        ) { uri ->
+
+            if (uri != null) {
+                exportContent?.let {
+                    writeTextUri(context, uri, it)
+                }
+            }
+
+            exportContent = null
         }
-    }
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) cameraUri?.let { attachment = ChatAttachment(it.toString(), "image/jpeg", "camera") }
+
+    val documentPicker =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument()
+        ) { uri ->
+
+            uri?.let {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        it,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+
+                val mime =
+                    context.contentResolver.getType(it)
+                        ?: "text/plain"
+
+                attachment =
+                    ChatAttachment(
+                        it.toString(),
+                        mime,
+                        it.lastPathSegment ?: "document"
+                    )
+            }
+        }
+
+    val photoPicker =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.PickVisualMedia()
+        ) { uri ->
+
+            uri?.let {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        it,
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+
+                attachment =
+                    ChatAttachment(
+                        it.toString(),
+                        context.contentResolver.getType(it)
+                            ?: "image/jpeg",
+                        "photo"
+                    )
+            }
+        }
+
+    val camera =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.TakePicture()
+        ) { ok ->
+
+            if (ok) {
+                cameraUri?.let {
+                    attachment =
+                        ChatAttachment(
+                            it.toString(),
+                            "image/jpeg",
+                            "camera"
+                        )
+                }
+            }
+        }
+
+    val recorder = remember {
+        AudioRecorder(context)
     }
 
-    val recorder = remember { AudioRecorder(context) }
-    var recording by remember { mutableStateOf(false) }
-    val amplitudes = remember { mutableStateListOf<Float>() }
+    var recording by remember {
+        mutableStateOf(false)
+    }
+
+    val amplitudes =
+        remember {
+            mutableStateListOf<Float>()
+        }
+
     fun beginRecording() {
-        runCatching { recorder.start() }.onSuccess { recording = true }.onFailure { }
+        runCatching {
+            recorder.start()
+        }.onSuccess {
+            recording = true
+        }
     }
-    val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) beginRecording() }
+
+    val audioPermission =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+
+            if (granted) {
+                beginRecording()
+            }
+        }
 
     LaunchedEffect(recording) {
         while (recording) {
             amplitudes += recorder.amplitude()
-            if (amplitudes.size > 64) amplitudes.removeAt(0)
+
+            if (amplitudes.size > 64) {
+                amplitudes.removeAt(0)
+            }
+
             delay(90)
         }
     }
+
     LaunchedEffect(state.speechDraft) {
-        state.speechDraft?.let { text = if (text.isBlank()) it else "$text $it"; vm.consumeSpeechDraft() }
+        state.speechDraft?.let {
+            text =
+                if (text.isBlank()) {
+                    it
+                } else {
+                    "$text $it"
+                }
+
+            vm.consumeSpeechDraft()
+        }
     }
+
     LaunchedEffect(pendingRemoteImage) {
         if (!pendingRemoteImage.isNullOrBlank()) {
-            attachment = ChatAttachment(pendingRemoteImage, "image/png", "generated", remote = true)
+            attachment =
+                ChatAttachment(
+                    pendingRemoteImage,
+                    "image/png",
+                    "generated",
+                    remote = true
+                )
+
             onConsumedRemoteImage()
         }
     }
+
     val density = LocalDensity.current
-    val imeBottom = WindowInsets.ime.getBottom(density)
-    LaunchedEffect(messages.size, messages.lastOrNull()?.content, imeBottom) {
-        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    val imeBottom =
+        WindowInsets.ime.getBottom(density)
+
+    LaunchedEffect(
+        messages.size,
+        messages.lastOrNull()?.content,
+        imeBottom
+    ) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(
+                messages.lastIndex
+            )
+        }
     }
 
     fun doSend() {
-        val model = selectedModel ?: return
-        vm.send(text, attachment, model)
-        text = ""; attachment = null
+        val model =
+            selectedModel ?: return
+
+        vm.send(
+            text,
+            attachment,
+            model
+        )
+
+        text = ""
+        attachment = null
     }
 
     Box(
-        Modifier.fillMaxSize().onPreviewKeyEvent { event ->
-            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-            val cmd = event.isCtrlPressed || event.isMetaPressed
-            when {
-                cmd && event.key == Key.Enter -> { doSend(); true }
-                cmd && event.key == Key.K -> { vm.clear(); Toast.makeText(context, strings.clear, Toast.LENGTH_SHORT).show(); true }
-                else -> false
+        Modifier
+            .fillMaxSize()
+            .onPreviewKeyEvent { event ->
+
+                if (event.type != KeyEventType.KeyDown) {
+                    return@onPreviewKeyEvent false
+                }
+
+                val cmd =
+                    event.isCtrlPressed ||
+                        event.isMetaPressed
+
+                when {
+
+                    cmd && event.key == Key.Enter -> {
+                        doSend()
+                        true
+                    }
+
+                    cmd && event.key == Key.K -> {
+                        vm.clear()
+
+                        Toast.makeText(
+                            context,
+                            strings.clear,
+                            Toast.LENGTH_SHORT
+                        ).show()
+
+                        true
+                    }
+
+                    else -> false
+                }
             }
-        },
     ) {
+
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            AiBrainLogo(); Spacer(Modifier.width(8.dp)); Text(strings.chat)
+                        Row(
+                            verticalAlignment =
+                                Alignment.CenterVertically
+                        ) {
+                            AiBrainLogo()
+
+                            Spacer(
+                                Modifier.width(8.dp)
+                            )
+
+                            Text(strings.chat)
                         }
                     },
-                    navigationIcon = { IconButton(onClick = { showSessions = true }) { Icon(Icons.Default.Menu, strings.sessions) } },
+
+                    navigationIcon = {
+                        IconButton(
+                            onClick = {
+                                showSessions = true
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Menu,
+                                strings.sessions
+                            )
+                        }
+                    },
+
                     actions = {
-                        IconButton(onClick = { showSearch = true }) { Icon(Icons.Default.Search, strings.search) }
+
+                        IconButton(
+                            onClick = {
+                                showSearch = true
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Search,
+                                strings.search
+                            )
+                        }
+
                         Box {
-                            IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.MoreVert, strings.more) }
-                            DropdownMenu(menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                                DropdownMenuItem({ Text(strings.summarize) }, onClick = { selectedModel?.let(vm::summarize); menuExpanded = false }, leadingIcon = { Icon(Icons.Default.Summarize, null) })
-                                DropdownMenuItem({ Text(strings.clear) }, onClick = { vm.clear(); menuExpanded = false }, leadingIcon = { Icon(Icons.Default.DeleteSweep, null) })
-                                DropdownMenuItem({ Text(strings.exportMarkdown) }, onClick = {
-                                    menuExpanded = false; scope.launch { exportMime = "text/markdown"; exportContent = vm.markdown(); createDocument.launch("ai-studio-chat.md") }
-                                }, leadingIcon = { Icon(Icons.Default.Description, null) })
-                                DropdownMenuItem({ Text(strings.exportJson) }, onClick = {
-                                    menuExpanded = false; scope.launch { exportMime = "application/json"; exportContent = vm.json(); createDocument.launch("ai-studio-chat.json") }
-                                }, leadingIcon = { Icon(Icons.Default.DataObject, null) })
+                            IconButton(
+                                onClick = {
+                                    menuExpanded = true
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    strings.more
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = {
+                                    menuExpanded = false
+                                }
+                            ) {
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(strings.summarize)
+                                    },
+                                    onClick = {
+                                        selectedModel?.let(
+                                            vm::summarize
+                                        )
+
+                                        menuExpanded = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Summarize,
+                                            null
+                                        )
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(strings.clear)
+                                    },
+                                    onClick = {
+                                        vm.clear()
+                                        menuExpanded = false
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.DeleteSweep,
+                                            null
+                                        )
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            strings.exportMarkdown
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+
+                                        scope.launch {
+                                            exportMime =
+                                                "text/markdown"
+
+                                            exportContent =
+                                                vm.markdown()
+
+                                            createDocument.launch(
+                                                "ai-studio-chat.md"
+                                            )
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Description,
+                                            null
+                                        )
+                                    }
+                                )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            strings.exportJson
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+
+                                        scope.launch {
+                                            exportMime =
+                                                "application/json"
+
+                                            exportContent =
+                                                vm.json()
+
+                                            createDocument.launch(
+                                                "ai-studio-chat.json"
+                                            )
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.DataObject,
+                                            null
+                                        )
+                                    }
+                                )
                             }
                         }
-                    },
+                    }
                 )
-            },
+            }
         ) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                ModelSelector(models.filter { it.supportsChat }, selectedModel?.id, strings.model, onSelectModel)
+
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+
+                ModelSelector(
+                    models =
+                        models.filter {
+                            it.supportsChat
+                        },
+                    selectedId =
+                        selectedModel?.id,
+                    fallbackLabel =
+                        strings.model,
+                    onSelect =
+                        onSelectModel
+                )
+
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                    contentPadding =
+                        PaddingValues(12.dp),
+                    verticalArrangement =
+                        Arrangement.spacedBy(10.dp)
                 ) {
-                    items(messages, key = { it.id }) { MessageBubble(it) }
-                    if (state.isStreaming) item { TypingIndicator(selectedModel?.displayName ?: "AI", strings.typing) }
+
+                    items(
+                        items = messages,
+                        key = { it.id }
+                    ) { message ->
+
+                        MessageBubble(message)
+                    }
+
+                    if (state.isStreaming) {
+                        item {
+                            TypingIndicator(
+                                selectedModel
+                                    ?.displayName
+                                    ?: "AI",
+                                strings.typing
+                            )
+                        }
+                    }
                 }
-                if (recording) Waveform(amplitudes, Modifier.padding(horizontal = 16.dp))
+
+                if (recording) {
+                    Waveform(
+                        amplitudes,
+                        Modifier.padding(
+                            horizontal = 16.dp
+                        )
+                    )
+                }
+
                 attachment?.let { att ->
-                    Surface(tonalElevation = 2.dp, modifier = Modifier.padding(horizontal = 12.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (att.mimeType.startsWith("image/")) AsyncImage(att.uri, contentDescription = null, modifier = Modifier.size(54.dp))
-                            else Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(42.dp))
+
+                    Surface(
+                        tonalElevation = 2.dp,
+                        modifier =
+                            Modifier.padding(
+                                horizontal = 12.dp
+                            )
+                    ) {
+
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment =
+                                Alignment.CenterVertically
+                        ) {
+
+                            if (
+                                att.mimeType
+                                    .startsWith("image/")
+                            ) {
+                                AsyncImage(
+                                    model = att.uri,
+                                    contentDescription = null,
+                                    modifier =
+                                        Modifier.size(54.dp)
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Description,
+                                    contentDescription = null,
+                                    modifier =
+                                        Modifier.size(42.dp)
+                                )
+                            }
+
+                            Spacer(
+                                Modifier.width(8.dp)
+                            )
+
+                            Text(
+                                att.displayName,
+                                Modifier.weight(1f)
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    attachment = null
+                                }
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    null
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Composer(
+                    text = text,
+                    onTextChange = {
+                        text = it
+                    },
+                    strings = strings,
+                    focusRequester =
+                        focusRequester,
+                    streaming =
+                        state.isStreaming,
+                    onSend = ::doSend,
+
+                    onPhoto = {
+                        photoPicker.launch(
+                            androidx.activity.result
+                                .PickVisualMediaRequest(
+                                    ActivityResultContracts
+                           else Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(42.dp))
                             Spacer(Modifier.width(8.dp)); Text(att.displayName, Modifier.weight(1f))
                             IconButton(onClick = { attachment = null }) { Icon(Icons.Default.Close, null) }
                         }
