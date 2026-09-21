@@ -8,30 +8,119 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - uses: actions/setup-java@v5
+      - name: Restore clean UI source files
+        shell: bash
+        run: |
+          CLEAN_COMMIT="6eb4b153cec244664c668355c80b74a8d35e2b65"
+
+          git checkout "$CLEAN_COMMIT" -- \
+            app/src/main/java/com/aistudio/superapp/ui/AIStudioRoot.kt \
+            app/src/main/java/com/aistudio/superapp/ui/chat/ChatScreen.kt \
+            app/src/main/java/com/aistudio/superapp/ui/imagegen/ImageGenScreen.kt \
+            app/src/main/java/com/aistudio/superapp/ui/vision/VisionScreen.kt \
+            app/src/main/java/com/aistudio/superapp/ui/voice/VoiceScreen.kt \
+            app/src/main/java/com/aistudio/superapp/ui/photo/PhotoEditorScreen.kt
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          files = [
+              Path("app/src/main/java/com/aistudio/superapp/ui/AIStudioRoot.kt"),
+              Path("app/src/main/java/com/aistudio/superapp/ui/chat/ChatScreen.kt"),
+              Path("app/src/main/java/com/aistudio/superapp/ui/imagegen/ImageGenScreen.kt"),
+              Path("app/src/main/java/com/aistudio/superapp/ui/vision/VisionScreen.kt"),
+              Path("app/src/main/java/com/aistudio/superapp/ui/voice/VoiceScreen.kt"),
+              Path("app/src/main/java/com/aistudio/superapp/ui/photo/PhotoEditorScreen.kt"),
+          ]
+
+          runtime_import = "import androidx.compose.runtime.*\n"
+          saveable_import = (
+              "import androidx.compose.runtime.saveable.rememberSaveable\n"
+          )
+
+          for path in files:
+              text = path.read_text(encoding="utf-8")
+
+              if "rememberSaveable" in text and saveable_import not in text:
+                  if runtime_import not in text:
+                      raise RuntimeError(
+                          f"runtime import not found in {path}"
+                      )
+
+                  text = text.replace(
+                      runtime_import,
+                      runtime_import + saveable_import,
+                      1
+                  )
+
+                  path.write_text(
+                      text,
+                      encoding="utf-8"
+                  )
+
+              print(f"Prepared: {path}")
+
+          PY
+
+          echo "=== rememberSaveable imports ==="
+          grep -R \
+            "runtime.saveable.rememberSaveable" \
+            app/src/main/java/com/aistudio/superapp/ui
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Install Android SDK 36
+        shell: bash
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - uses: gradle/actions/setup-gradle@v4
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.5.0"
 
-      - name: Build APK
+      - name: Build Debug APK
+        shell: bash
         run: |
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug \
+            --no-daemon \
+            --stacktrace
 
-      - uses: actions/upload-artifact@v4
+      - name: Verify APK
+        shell: bash
+        run: |
+          echo "=== Generated APK ==="
+
+          find app/build/outputs/apk \
+            -type f \
+            -name "*.apk" \
+            -print
+
+          test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: AIStudioSuperApp-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
