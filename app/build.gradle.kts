@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.aistudio.superapp"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.aistudio.superapp"
