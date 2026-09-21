@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -25,16 +26,383 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun VoiceScreen(strings: StudioStrings, models: List<ModelConfig>, aiRepo: AiRepository, persian: Boolean) {
-    val vm: VoiceViewModel = viewModel(factory = VoiceViewModel.factory(aiRepo))
+fun VoiceScreen(
+    strings: StudioStrings,
+    models: List<ModelConfig>,
+    aiRepo: AiRepository,
+    persian: Boolean
+) {
+    val vm: VoiceViewModel =
+        viewModel(
+            factory = VoiceViewModel.factory(aiRepo)
+        )
+
     val state by vm.state.collectAsState()
     val context = LocalContext.current
-    val recorder = remember { AudioRecorder(context) }
-    var recording by remember { mutableStateOf(false) }
-    val amplitudes = remember { mutableStateListOf<Float>() }
-    val audioModels = models.filter { it.supportsAudio }
-    var selectedId by rememberSaveable { mutableStateOf(audioModels.firstOrNull()?.id.orEmpty()) }
-    val selected = audioModels.firstOrNull { it.id == selectedId } ?: audioModels.firstOrNull()
+
+    val recorder = remember {
+        AudioRecorder(context)
+    }
+
+    var recording by remember {
+        mutableStateOf(false)
+    }
+
+    val amplitudes = remember {
+        mutableStateListOf<Float>()
+    }
+
+    val audioModels =
+        models.filter {
+            it.supportsAudio
+        }
+
+    var selectedId by rememberSaveable {
+        mutableStateOf(
+            audioModels
+                .firstOrNull()
+                ?.id
+                .orEmpty()
+        )
+    }
+
+    val selected =
+        audioModels.firstOrNull {
+            it.id == selectedId
+        } ?: audioModels.firstOrNull()
+
+    var lastFile by remember {
+        mutableStateOf<java.io.File?>(null)
+    }
+
+    var tts by remember {
+        mutableStateOf<TextToSpeech?>(null)
+    }
+
+    DisposableEffect(context, persian) {
+        val engine =
+            TextToSpeech(context) { status ->
+
+                if (status == TextToSpeech.SUCCESS) {
+                    tts?.language =
+                        if (persian) {
+                            Locale("fa", "IR")
+                        } else {
+                            Locale.US
+                        }
+                }
+            }
+
+        tts = engine
+
+        onDispose {
+            engine.stop()
+            engine.shutdown()
+            tts = null
+        }
+    }
+
+    fun startRecording() {
+        runCatching {
+            recorder.start()
+        }.onSuccess {
+            recording = true
+            amplitudes.clear()
+        }
+    }
+
+    val permission =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission()
+        ) { granted ->
+
+            if (granted) {
+                startRecording()
+            }
+        }
+
+    LaunchedEffect(recording) {
+        while (recording) {
+            amplitudes += recorder.amplitude()
+
+            if (amplitudes.size > 64) {
+                amplitudes.removeAt(0)
+            }
+
+            delay(90)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(strings.voice)
+                }
+            )
+        }
+    ) { padding ->
+
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(16.dp),
+
+            verticalArrangement =
+                Arrangement.spacedBy(12.dp)
+        ) {
+
+            Waveform(amplitudes)
+
+            Row(
+                horizontalArrangement =
+                    Arrangement.spacedBy(8.dp)
+            ) {
+
+                Button(
+                    onClick = {
+
+                        if (recording) {
+
+                            recording = false
+                            lastFile = recorder.stop()
+
+                        } else if (
+                            ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                        ) {
+
+                            startRecording()
+
+                        } else {
+
+                            permission.launch(
+                                Manifest.permission.RECORD_AUDIO
+                            )
+                        }
+                    }
+                ) {
+
+                    Icon(
+                        imageVector =
+                            if (recording) {
+                                Icons.Default.Stop
+                            } else {
+                                Icons.Default.Mic
+                            },
+                        contentDescription = null
+                    )
+
+                    Spacer(
+                        Modifier.width(6.dp)
+                    )
+
+                    Text(
+                        if (recording) {
+                            strings.stopRecording
+                        } else {
+                            strings.startRecording
+                        }
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        val file = lastFile
+                        val model = selected
+
+                        if (
+                            file != null &&
+                            model != null
+                        ) {
+                            vm.transcribe(
+                                file,
+                                model
+                            )
+                        }
+                    },
+
+                    enabled =
+                        lastFile != null &&
+                            selected != null &&
+                            !state.loading
+                ) {
+
+                    if (state.loading) {
+
+                        CircularProgressIndicator(
+                            modifier =
+                                Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+
+                    } else {
+
+                        Icon(
+                            Icons.Default.GraphicEq,
+                            contentDescription = null
+                        )
+                    }
+
+                    Spacer(
+                        Modifier.width(6.dp)
+                    )
+
+                    Text(strings.transcribe)
+                }
+            }
+
+            AudioModelSelector(
+                models = audioModels,
+                selected = selected?.id,
+                fallbackLabel = strings.sttModel,
+                onSelect = {
+                    selectedId = it
+                }
+            )
+
+            OutlinedTextField(
+                value = state.transcript,
+                onValueChange = vm::updateTranscript,
+
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+
+                label = {
+                    Text(strings.transcribe)
+                }
+            )
+
+            Button(
+                onClick = {
+
+                    val language =
+                        if (persian) {
+                            Locale("fa", "IR")
+                        } else {
+                            Locale.US
+                        }
+
+                    tts?.language = language
+
+                    tts?.speak(
+                        state.transcript,
+                        TextToSpeech.QUEUE_FLUSH,
+                        null,
+                        "ai-studio-tts"
+                    )
+                },
+
+                enabled =
+                    state.transcript.isNotBlank(),
+
+                modifier =
+                    Modifier.fillMaxWidth()
+            ) {
+
+                Icon(
+                    Icons.Default.VolumeUp,
+                    contentDescription = null
+                )
+
+                Spacer(
+                    Modifier.width(6.dp)
+                )
+
+                Text(strings.speak)
+            }
+        }
+    }
+
+    state.error?.let { error ->
+
+        AlertDialog(
+            onDismissRequest =
+                vm::clearError,
+
+            confirmButton = {
+
+                TextButton(
+                    onClick =
+                        vm::clearError
+                ) {
+                    Text(strings.ok)
+                }
+            },
+
+            title = {
+                Text(strings.error)
+            },
+
+            text = {
+                Text(error)
+            }
+        )
+    }
+}
+
+@Composable
+private fun AudioModelSelector(
+    models: List<ModelConfig>,
+    selected: String?,
+    fallbackLabel: String,
+    onSelect: (String) -> Unit
+) {
+    var open by remember {
+        mutableStateOf(false)
+    }
+
+    val selectedModel =
+        models.firstOrNull {
+            it.id == selected
+        }
+
+    Box {
+
+        OutlinedButton(
+            onClick = {
+                open = true
+            }
+        ) {
+
+            Text(
+                selectedModel
+                    ?.displayName
+                    ?: fallbackLabel
+            )
+        }
+
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = {
+                open = false
+            }
+        ) {
+
+            models.forEach { model ->
+
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            model.displayName
+                        )
+                    },
+
+                    onClick = {
+                        onSelect(model.id)
+                        open = false
+                    }
+                )
+            }
+        }
+    }
+}    val selected = audioModels.firstOrNull { it.id == selectedId } ?: audioModels.firstOrNull()
     var lastFile by remember { mutableStateOf<java.io.File?>(null) }
 
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
