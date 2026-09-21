@@ -29,43 +29,34 @@ jobs:
       - name: Locate Android SDK Manager
         shell: bash
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
           SDKMANAGER="$(find "$ANDROID_HOME" \
             -type f \
             -path "*/cmdline-tools/*/bin/sdkmanager" \
             2>/dev/null | head -n 1)"
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager was not found"
-            find "$ANDROID_HOME" -maxdepth 4 -type f | head -200
+            echo "sdkmanager not found"
             exit 1
           fi
-
-          echo "Found sdkmanager: $SDKMANAGER"
 
           echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
 
-      - name: Show SDK Manager version
-        shell: bash
-        run: |
-          "$SDKMANAGER" --version
+          echo "Found: $SDKMANAGER"
 
       - name: Accept Android licenses
         shell: bash
         run: |
           yes | "$SDKMANAGER" --licenses >/dev/null || true
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK 36
         shell: bash
         run: |
           "$SDKMANAGER" \
             "platform-tools" \
-            "platforms;android-37" \
-            "build-tools;35.0.0"
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
       - name: Set up Gradle 9.5.0
         uses: gradle/actions/setup-gradle@v4
@@ -86,18 +77,15 @@ jobs:
             --no-daemon \
             --stacktrace
 
-      - name: Find APK
-        if: success()
+      - name: Find generated APK
         shell: bash
         run: |
-          echo "Generated APK:"
           find app/build/outputs/apk \
             -type f \
             -name "*.apk" \
             -print
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: AIStudioSuperApp-debug-apk
